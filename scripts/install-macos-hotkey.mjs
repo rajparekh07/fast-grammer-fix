@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execFile } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,7 +10,8 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const label = "com.raj.grammer-fix-fast";
+const label = "com.rajparekhinc.fast-grammer-fix";
+const legacyLabels = ["com.raj.grammer-fix-fast"];
 const appDir = path.join(root, "dist", "GrammarFixFast.app");
 const contentsDir = path.join(appDir, "Contents");
 const macosDir = path.join(contentsDir, "MacOS");
@@ -42,8 +43,12 @@ async function main() {
   const codexPath = await resolveCodexPath();
 
   await writeFile(path.join(contentsDir, "Info.plist"), infoPlist(), "utf8");
+  console.log("Signing macOS hotkey app...");
+  await execFileAsync("codesign", ["--force", "--deep", "--sign", "-", appDir]);
+
   await writeFile(plistPath, launchAgentPlist(codexPath), "utf8");
 
+  await removeLegacyLaunchAgents();
   await launchctl(["bootout", `gui/${process.getuid()}`, plistPath]).catch(() => {});
   await launchctl(["bootstrap", `gui/${process.getuid()}`, plistPath]);
   await launchctl(["kickstart", "-k", `gui/${process.getuid()}/${label}`]).catch(() => {});
@@ -168,6 +173,15 @@ function escapeXml(value) {
 
 async function launchctl(args) {
   return execFileAsync("launchctl", args, { timeout: 15_000 });
+}
+
+async function removeLegacyLaunchAgents() {
+  for (const legacyLabel of legacyLabels) {
+    const legacyPlistPath = path.join(launchAgentsDir, `${legacyLabel}.plist`);
+    await launchctl(["bootout", `gui/${process.getuid()}`, legacyPlistPath]).catch(() => {});
+    await launchctl(["bootout", `gui/${process.getuid()}/${legacyLabel}`]).catch(() => {});
+    await rm(legacyPlistPath, { force: true });
+  }
 }
 
 main().catch((error) => {

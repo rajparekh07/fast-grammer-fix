@@ -7,12 +7,17 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
-const label = "com.raj.grammer-fix-fast";
-const plistPath = path.join(os.homedir(), "Library", "LaunchAgents", `${label}.plist`);
+const labels = ["com.rajparekhinc.fast-grammer-fix", "com.raj.grammer-fix-fast"];
+const launchAgentsDir = path.join(os.homedir(), "Library", "LaunchAgents");
 
 async function main() {
-  await execFileAsync("launchctl", ["bootout", `gui/${process.getuid()}`, plistPath]).catch(() => {});
-  await rm(plistPath, { force: true });
+  for (const label of labels) {
+    const plistPath = path.join(launchAgentsDir, `${label}.plist`);
+    await execFileAsync("launchctl", ["bootout", `gui/${process.getuid()}`, plistPath]).catch(() => {});
+    await execFileAsync("launchctl", ["bootout", `gui/${process.getuid()}/${label}`]).catch(() => {});
+    await rm(plistPath, { force: true });
+  }
+
   console.log("Uninstalled Grammar Fix Fast launch agent.");
 }
 
