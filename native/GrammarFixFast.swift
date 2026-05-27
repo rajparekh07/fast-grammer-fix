@@ -100,6 +100,7 @@ final class HotkeyController {
     private let bubble = Bubble()
     private var hotKeyRef: EventHotKeyRef?
     private var busy = false
+    private var didRequestAccessibilityAccess = false
 
     func start() {
         let config = parseHotkey(ProcessInfo.processInfo.environment["GRAMMER_FIX_HOTKEY"] ?? "ctrl+option+cmd+g")
@@ -132,6 +133,7 @@ final class HotkeyController {
         }
 
         guard isAccessibilityTrusted() else {
+            requestAccessibilityAccess()
             bubble.show("Allow Accessibility access for Grammar Fix", autoHideAfter: 5.0)
             return
         }
@@ -191,8 +193,27 @@ final class HotkeyController {
     }
 
     private func isAccessibilityTrusted() -> Bool {
+        return AXIsProcessTrusted()
+    }
+
+    private func requestAccessibilityAccess() {
+        guard !didRequestAccessibilityAccess else {
+            return
+        }
+
+        didRequestAccessibilityAccess = true
         let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
-        return AXIsProcessTrustedWithOptions([key: true] as CFDictionary)
+        AXIsProcessTrustedWithOptions([key: true] as CFDictionary)
+        openAccessibilitySettings()
+    }
+
+    private func openAccessibilitySettings() {
+        guard ProcessInfo.processInfo.environment["GRAMMER_FIX_OPEN_ACCESSIBILITY_SETTINGS"] != "0",
+              let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") else {
+            return
+        }
+
+        NSWorkspace.shared.open(url)
     }
 
     private func copySelectedText() -> String? {

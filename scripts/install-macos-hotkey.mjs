@@ -20,6 +20,7 @@ const swiftPath = path.join(root, "native", "GrammarFixFast.swift");
 const launchAgentsDir = path.join(os.homedir(), "Library", "LaunchAgents");
 const plistPath = path.join(launchAgentsDir, `${label}.plist`);
 const logDir = path.join(os.homedir(), "Library", "Logs", "GrammarFixFast");
+const lsregisterPath = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
 
 async function main() {
   await mkdir(macosDir, { recursive: true });
@@ -43,8 +44,10 @@ async function main() {
   const codexPath = await resolveCodexPath();
 
   await writeFile(path.join(contentsDir, "Info.plist"), infoPlist(), "utf8");
-  console.log("Signing macOS hotkey app...");
-  await execFileAsync("codesign", ["--force", "--deep", "--sign", "-", appDir]);
+  const signingIdentity = await resolveSigningIdentity();
+  console.log(`Signing macOS hotkey app with ${signingIdentity === "-" ? "ad-hoc identity" : signingIdentity}...`);
+  await signAppBundle(signingIdentity);
+  await registerAppBundle();
 
   await writeFile(plistPath, launchAgentPlist(codexPath), "utf8");
 
@@ -133,6 +136,34 @@ function launchAgentPlist(codexPath) {
   </dict>`);
 }
 
+async function resolveSigningIdentity() {
+  if (process.env.GRAMMER_FIX_CODESIGN_IDENTITY) {
+    return process.env.GRAMMER_FIX_CODESIGN_IDENTITY;
+  }
+
+  const { stdout } = await execFileAsync("security", ["find-identity", "-v", "-p", "codesigning"]).catch(() => ({ stdout: "" }));
+  const match = stdout.match(/"([^"]+)"/);
+  return match?.[1] || "-";
+}
+
+async function signAppBundle(signingIdentity) {
+  const args = [
+    "--force",
+    "--deep",
+    "--sign",
+    signingIdentity,
+    "--identifier",
+    label,
+  ];
+
+  if (signingIdentity !== "-") {
+    args.push("--timestamp=none");
+  }
+
+  args.push(appDir);
+  await execFileAsync("codesign", args);
+}
+
 function launchAgentPath(codexPath) {
   const home = os.homedir();
   const values = [
@@ -182,6 +213,11 @@ async function removeLegacyLaunchAgents() {
     await launchctl(["bootout", `gui/${process.getuid()}/${legacyLabel}`]).catch(() => {});
     await rm(legacyPlistPath, { force: true });
   }
+}
+
+async function registerAppBundle() {
+  await execFileAsync(lsregisterPath, ["-u", appDir]).catch(() => {});
+  await execFileAsync(lsregisterPath, ["-f", appDir]);
 }
 
 main().catch((error) => {
