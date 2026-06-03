@@ -101,9 +101,11 @@ final class HotkeyController {
     private var hotKeyRef: EventHotKeyRef?
     private var busy = false
     private var didRequestAccessibilityAccess = false
+    private var hotkeyConfig = parseHotkey("ctrl+option+cmd+g")
 
     func start() {
         let config = parseHotkey(ProcessInfo.processInfo.environment["GRAMMER_FIX_HOTKEY"] ?? "ctrl+option+cmd+g")
+        hotkeyConfig = config
         installHotkeyHandler()
 
         let status = RegisterEventHotKey(
@@ -143,7 +145,7 @@ final class HotkeyController {
 
         let previousPasteboard = snapshotPasteboard()
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+        waitForHotkeyRelease {
             guard let selectedText = self.copySelectedText(), selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
                 self.restorePasteboard(previousPasteboard)
                 self.busy = false
@@ -170,6 +172,39 @@ final class HotkeyController {
                     }
                 }
             }
+        }
+    }
+
+    private func waitForHotkeyRelease(completion: @escaping () -> Void) {
+        waitForHotkeyRelease(until: Date().addingTimeInterval(0.8), completion: completion)
+    }
+
+    private func waitForHotkeyRelease(until deadline: Date, completion: @escaping () -> Void) {
+        guard Date() < deadline, isAnyHotkeyKeyPressed() else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: completion)
+            return
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) {
+            self.waitForHotkeyRelease(until: deadline, completion: completion)
+        }
+    }
+
+    private func isAnyHotkeyKeyPressed() -> Bool {
+        let keys: [UInt32] = [
+            hotkeyConfig.keyCode,
+            UInt32(kVK_Command),
+            UInt32(kVK_RightCommand),
+            UInt32(kVK_Control),
+            UInt32(kVK_RightControl),
+            UInt32(kVK_Option),
+            UInt32(kVK_RightOption),
+            UInt32(kVK_Shift),
+            UInt32(kVK_RightShift),
+        ]
+
+        return keys.contains { keyCode in
+            CGEventSource.keyState(.combinedSessionState, key: CGKeyCode(keyCode))
         }
     }
 
@@ -219,12 +254,15 @@ final class HotkeyController {
     private func copySelectedText() -> String? {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
+        let startingChangeCount = pasteboard.changeCount
         keyTap(UInt16(kVK_ANSI_C), flags: .maskCommand)
 
-        let deadline = Date().addingTimeInterval(0.9)
+        let deadline = Date().addingTimeInterval(1.4)
         while Date() < deadline {
             RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.03))
-            if let text = pasteboard.string(forType: .string), !text.isEmpty {
+            if pasteboard.changeCount != startingChangeCount,
+               let text = pasteboard.string(forType: .string),
+               !text.isEmpty {
                 return text
             }
         }
